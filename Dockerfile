@@ -1,8 +1,8 @@
 # 使用官方Python镜像替代GitHub Container Registry
-FROM python:3.10-slim-bookworm
+FROM swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/python:3.10-slim-bookworm
 
 # 安装uv包管理器
-RUN pip install uv
+RUN pip install -i https://mirrors.aliyun.com/pypi/simple uv
 
 WORKDIR /app
 
