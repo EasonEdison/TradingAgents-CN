@@ -563,10 +563,13 @@ def render_export_buttons(results: Dict[str, Any]):
                 logger.error("❌ Markdown导出失败，content为空")
     
     with col2:
+
+
         if st.button("📝 导出 Word", help="导出为Word文档格式"):
             logger.info(f"🖱️ [EXPORT] 用户点击Word导出按钮 - 股票: {stock_symbol}")
             logger.info(f"🖱️ 用户点击Word导出按钮 - 股票: {stock_symbol}")
             with st.spinner("正在生成Word文档，请稍候..."):
+                
                 try:
                     logger.info(f"🔄 [EXPORT] 开始Word导出流程...")
                     logger.info("🔄 开始Word导出流程...")
