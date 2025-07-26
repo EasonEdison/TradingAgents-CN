@@ -571,7 +571,207 @@ def main():
         return
     elif page == "📈 历史记录":
         st.header("📈 历史记录")
-        st.info("历史记录功能开发中...")
+        # 历史报告分页查询
+        try:
+            from tradingagents.config.database_manager import get_database_manager
+            db_manager = get_database_manager()
+            db_manager.create_tables_if_not_exist()
+            conn = db_manager.get_mysql_conn()
+            cursor = conn.cursor()
+            # 筛选条件
+            advice_options = ['全部', '买入', '卖出', '持有', '无建议']
+            selected_advice = st.selectbox("建议筛选", advice_options, index=0)
+            sort_options = {
+                '创建时间(新→旧)': 'created_at DESC',
+                '创建时间(旧→新)': 'created_at ASC',
+                '置信度(高→低)': 'decision_confidence DESC',
+                '置信度(低→高)': 'decision_confidence ASC',
+                '风险评分(高→低)': 'decision_risk_score DESC',
+                '风险评分(低→高)': 'decision_risk_score ASC',
+                '目标价位(高→低)': 'decision_target_price DESC',
+                '目标价位(低→高)': 'decision_target_price ASC',
+            }
+            selected_sort = st.selectbox("排序方式", list(sort_options.keys()), index=0)
+            # 分页参数
+            page_size = 10
+            page_num = st.number_input("页码", min_value=1, value=1, step=1)
+            offset = (page_num - 1) * page_size
+            # 查询总数和数据
+            where_sql = ""
+            params = []
+            if selected_advice != '全部':
+                if selected_advice == '无建议':
+                    where_sql = "WHERE final_advice IS NULL OR final_advice = ''"
+                else:
+                    where_sql = "WHERE final_advice = %s"
+                    params.append(selected_advice)
+            count_sql = f"SELECT COUNT(*) FROM report_sessions {where_sql}"
+            cursor.execute(count_sql, params)
+            total_count = cursor.fetchone()[0]
+            # 查询分页数据，包含建议、置信度、风险评分、目标价位
+            order_sql = sort_options[selected_sort]
+            data_sql = f"SELECT id, stock_symbol, market_type, analysis_date, created_at, final_advice, decision_confidence, decision_risk_score, decision_target_price FROM report_sessions {where_sql} ORDER BY {order_sql} LIMIT %s OFFSET %s"
+            params += [page_size, offset]
+            cursor.execute(data_sql, params)
+            rows = cursor.fetchall()
+            st.write(f"共 {total_count} 条记录")
+            # 使用Streamlit的dataframe显示，支持更好的表格格式
+            import pandas as pd
+            data = []
+            for row in rows:
+                session_id, stock_symbol, market_type, analysis_date, created_at, final_advice, decision_confidence, decision_risk_score, decision_target_price = row
+                data.append({
+                    '股票代码': stock_symbol,
+                    '市场': market_type,
+                    '日期': str(analysis_date),
+                    '建议': final_advice or '-',
+                    '置信度': f"{decision_confidence:.2f}" if decision_confidence is not None else '-',
+                    '风险评分': f"{decision_risk_score:.2f}" if decision_risk_score is not None else '-',
+                    '目标价位': str(decision_target_price) if decision_target_price is not None else '-',
+                    '创建时间': str(created_at),
+                    '详情': f"[查看详情](/历史详情?session_id={session_id})"
+                })
+            
+            if data:
+                df = pd.DataFrame(data)
+                
+                # 显示统计信息
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("总记录数", total_count)
+                with col2:
+                    advice_counts = df['建议'].value_counts()
+                    buy_count = advice_counts.get('买入', 0)
+                    st.metric("买入建议", buy_count)
+                with col3:
+                    sell_count = advice_counts.get('卖出', 0)
+                    st.metric("卖出建议", sell_count)
+                with col4:
+                    hold_count = advice_counts.get('持有', 0)
+                    st.metric("持有建议", hold_count)
+                
+                # 使用Streamlit的dataframe显示，在表格中直接添加详情按钮
+                display_data = []
+                for row in data:
+                    session_id = row['详情'].split('session_id=')[1].split(')')[0]  # 提取session_id
+                    display_data.append({
+                        '股票代码': row['股票代码'],
+                        '市场': row['市场'],
+                        '日期': row['日期'],
+                        '建议': row['建议'],
+                        '置信度': row['置信度'],
+                        '风险评分': row['风险评分'],
+                        '目标价位': row['目标价位'],
+                        '创建时间': row['创建时间'],
+                        'Session ID': session_id
+                    })
+                
+                df_display = pd.DataFrame(display_data)
+                
+                # 添加序号列，让用户更容易对应
+                df_display_with_index = df_display.copy()
+                df_display_with_index.insert(0, '序号', range(1, len(df_display_with_index) + 1))
+                
+                # 使用Streamlit的dataframe显示，支持更好的表格格式
+                st.dataframe(df_display_with_index.drop('Session ID', axis=1), use_container_width=True, hide_index=True)
+                
+                # 在表格下方添加可点击的详情按钮，使用列布局
+                st.subheader("📋 快速查看详情")
+                # 每行显示3个按钮
+                for i in range(0, len(display_data), 3):
+                    cols = st.columns(3)
+                    for j in range(3):
+                        if i + j < len(display_data):
+                            row = display_data[i + j]
+                            with cols[j]:
+                                # 创建更详细的按钮文本，包含序号、时间和建议来区分
+                                time_str = row['创建时间'][11:16]  # 只显示时:分
+                                advice_str = row['建议'] if row['建议'] != '-' else '无建议'
+                                button_text = f"#{i+j+1} {row['股票代码']} ({time_str}) {advice_str}"
+                                if st.button(button_text, key=f"detail_{row['Session ID']}"):
+                                    # 设置查询参数并重新运行
+                                    st.query_params["session_id"] = row['Session ID']
+                                    st.rerun()
+            else:
+                st.info("暂无历史记录")
+            cursor.close()
+        except Exception as e:
+            st.error(f"历史记录查询失败: {e}")
+        return
+    # 详情页路由
+    import urllib.parse
+    query_params = st.query_params if hasattr(st, 'query_params') else {}
+    session_id = None
+    # 兼容Streamlit 1.30+ query_params
+    if not session_id and 'session_id' in query_params:
+        session_id = query_params['session_id']
+    # 兼容URL路径直接访问
+    if not session_id:
+        import re
+        import streamlit.web.server.websocket_headers as ws_headers
+        url = ws_headers._get_websocket_headers().get('referer', '')
+        m = re.search(r'session_id=(\d+)', url)
+        if m:
+            session_id = m.group(1)
+    if session_id:
+        st.header(f"📋 报告详情 (Session ID: {session_id})")
+        try:
+            from tradingagents.config.database_manager import get_database_manager
+            db_manager = get_database_manager()
+            conn = db_manager.get_mysql_conn()
+            cursor = conn.cursor()
+            # 查询主信息
+            cursor.execute("SELECT stock_symbol, market_type, analysis_date, created_at, final_advice, decision_summary, decision_action, decision_confidence, decision_risk_score, decision_target_price FROM report_sessions WHERE id=%s", (session_id,))
+            session_row = cursor.fetchone()
+            if not session_row:
+                st.error("未找到该报告")
+                return
+            stock_symbol, market_type, analysis_date, created_at, final_advice, decision_summary, decision_action, decision_confidence, decision_risk_score, decision_target_price = session_row
+            st.write(f"**股票代码**: {stock_symbol}")
+            st.write(f"**市场类型**: {market_type}")
+            st.write(f"**分析日期**: {analysis_date}")
+            st.write(f"**创建时间**: {created_at}")
+            if final_advice:
+                st.success(f"**最终投资建议**: {final_advice}")
+            # 决策摘要信息
+            with st.expander("决策摘要信息", expanded=True):
+                st.write(f"**决策**: {decision_action if decision_action else '-'}")
+                st.write(f"**置信度**: {decision_confidence if decision_confidence is not None else '-'}")
+                st.write(f"**风险评分**: {decision_risk_score if decision_risk_score is not None else '-'}")
+                st.write(f"**目标价位**: {decision_target_price if decision_target_price else '-'}")
+                st.write(f"**决策摘要**: {decision_summary if decision_summary else '-'}")
+            # 查询所有子报告
+            cursor.execute("SELECT report_type, report_markdown, created_at, advice FROM analysis_reports WHERE session_id=%s ORDER BY report_type", (session_id,))
+            reports = cursor.fetchall()
+            if not reports:
+                st.info("该分析暂未生成任何子报告。")
+            # 英文类型到中文标题映射
+            type_map = {
+                'market_report': '📈 市场技术分析',
+                'fundamentals_report': '💰 基本面分析',
+                'sentiment_report': '💭 市场情绪分析',
+                'news_report': '📰 新闻事件分析',
+                'risk_assessment': '⚠️ 风险评估',
+                'investment_plan': '📋 投资建议',
+                'final_trade_decision': '🎯 最终投资决策',
+                'trader_investment_plan': '💼 交易员计划',
+                'bull_history': '🐂 看涨分析师观点',
+                'bear_history': '🐻 看跌分析师观点',
+                'neutral_history': '⚖️ 中性分析师观点',
+                'history': '历史消息',
+            }
+            skip_types = {'company_of_interest', 'sender', 'trade_date'}
+            for report_type, report_markdown, report_created, advice in reports:
+                if report_type in skip_types:
+                    continue
+                display_title = type_map.get(report_type, report_type)
+                with st.expander(f"{display_title} (创建: {report_created})", expanded=True):
+                    if advice:
+                        st.info(f"**建议**: {advice}")
+                    st.markdown(report_markdown)
+            cursor.close()
+        except Exception as e:
+            st.error(f"报告详情查询失败: {e}")
         return
     elif page == "🔧 系统状态":
         st.header("🔧 系统状态")

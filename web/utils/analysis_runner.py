@@ -425,6 +425,74 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
                        'event_type': 'web_analysis_complete'
                    })
 
+        # 自动保存到MySQL
+        try:
+            logger.info(f"[DEBUG] 自动保存前的results['state']: {results['state']}")
+            logger.info(f"[DEBUG] 自动保存前的results['decision']: {results.get('decision')}")
+            from tradingagents.config.database_manager import get_database_manager
+            db_manager = get_database_manager()
+            db_manager.create_tables_if_not_exist()
+            # 提取最终建议
+            final_advice_raw = extract_decision_advice(results.get('decision'))
+            logger.info(f"[DEBUG] 提取到的final_advice_raw: {final_advice_raw}")
+            final_advice = normalize_advice(final_advice_raw)
+            logger.info(f"[DEBUG] 归一化final_advice: {final_advice}")
+            # 提取决策摘要等字段
+            decision = results.get('decision', {})
+            decision_summary = None
+            decision_action = None
+            decision_confidence = None
+            decision_risk_score = None
+            decision_target_price = None
+            if isinstance(decision, dict):
+                decision_summary = decision.get('reasoning')
+                decision_action = normalize_advice(decision.get('action'))
+                try:
+                    decision_confidence = float(decision.get('confidence')) if decision.get('confidence') is not None else None
+                except Exception:
+                    decision_confidence = None
+                try:
+                    decision_risk_score = float(decision.get('risk_score')) if decision.get('risk_score') is not None else None
+                except Exception:
+                    decision_risk_score = None
+                decision_target_price = str(decision.get('target_price')) if decision.get('target_price') is not None else None
+            elif isinstance(decision, str):
+                decision_action = normalize_advice(decision)
+            # 插入session，带所有决策字段
+            session_id_db = db_manager.insert_report_session(
+                stock_symbol=stock_symbol,
+                market_type=market_type,
+                analysis_date=analysis_date,
+                final_advice=final_advice,
+                decision_summary=decision_summary,
+                decision_action=decision_action,
+                decision_confidence=decision_confidence,
+                decision_risk_score=decision_risk_score,
+                decision_target_price=decision_target_price
+            )
+            # 插入各类型子报告
+            for report_type, content in results['state'].items():
+                # 只保存字符串类型的子报告内容（即markdown）
+                if isinstance(content, str) and content.strip():
+                    # 提取建议，仅对final_trade_decision等类型
+                    advice = None
+                    if report_type in {"final_trade_decision", "investment_plan", "trader_investment_plan"}:
+                        advice_raw = extract_decision_advice(results.get('decision'))
+                        logger.info(f"[DEBUG] {report_type}提取到的advice_raw: {advice_raw}")
+                        advice = normalize_advice(advice_raw)
+                        logger.info(f"[DEBUG] {report_type}归一化advice: {advice}")
+                    db_manager.insert_analysis_report(
+                        session_id=session_id_db,
+                        report_type=report_type,
+                        report_markdown=content,
+                        advice=advice
+                    )
+                    logger.info(f"[DEBUG] 已保存markdown子报告: type={report_type}, advice={advice}")
+                else:
+                    logger.info(f"[DEBUG] 跳过非markdown子报告: type={report_type}, 类型={type(content)}")
+        except Exception as e:
+            logger.error(f"❌ 自动保存分析报告到MySQL失败: {e}")
+
         update_progress("✅ 分析成功完成！")
         return results
 
@@ -836,3 +904,77 @@ def generate_demo_results(stock_symbol, analysis_date, analysts, research_depth,
         'is_demo': True,
         'demo_reason': f"API调用失败，显示演示数据。错误信息: {error_msg}"
     }
+
+def normalize_advice(advice):
+    if not advice:
+        return None
+    advice = str(advice).strip().lower()
+    mapping = {
+        'buy': '买入', '买入': '买入',
+        'sell': '卖出', '卖出': '卖出',
+        'hold': '持有', '持有': '持有', '观望': '持有', 'wait': '持有'
+    }
+    for k, v in mapping.items():
+        if k in advice:
+            return v
+    return None
+
+def extract_decision_advice(decision):
+    """从decision结构中提取建议字符串"""
+    import re
+    if not decision:
+        return None
+    # dict类型优先action字段
+    if isinstance(decision, dict):
+        action = decision.get('action')
+        if action:
+            return str(action)
+        # 兼容其它常见字段
+        for key in ['advice', 'suggestion', 'recommend', 'final_decision']:
+            if key in decision and decision[key]:
+                return str(decision[key])
+        # 尝试在所有value中找关键词
+        for v in decision.values():
+            if isinstance(v, str) and re.search(r'(买入|卖出|持有|buy|sell|hold|观望|wait)', v, re.I):
+                return v
+    # 字符串类型直接返回
+    if isinstance(decision, str):
+        return decision
+    # 其它类型转字符串
+    return str(decision)
+
+def test_report_save_debug(state, session_id_db=None):
+    """测试子报告内容的序列化和保存过程，帮助定位写入MySQL失败的原因"""
+    import logging
+    logger = logging.getLogger("web")
+    from tradingagents.config.database_manager import get_database_manager
+    db_manager = get_database_manager()
+    db_manager.create_tables_if_not_exist()
+    if session_id_db is None:
+        session_id_db = db_manager.insert_report_session(
+            stock_symbol="TEST",
+            market_type="A股",
+            analysis_date="2025-07-24"
+        )
+    for report_type, content in state.items():
+        logger.info(f"[TEST] 尝试保存子报告: type={report_type}, 原始类型={type(content)}")
+        try:
+            # 保证内容为字符串
+            if not isinstance(content, str):
+                import json
+                try:
+                    content_str = json.dumps(content, ensure_ascii=False, indent=2)
+                except Exception as e:
+                    logger.error(f"[TEST] {report_type} 无法直接json序列化: {e}")
+                    # 尝试转为字符串
+                    content_str = str(content)
+            else:
+                content_str = content
+            db_manager.insert_analysis_report(
+                session_id=session_id_db,
+                report_type=report_type,
+                report_markdown=content_str
+            )
+            logger.info(f"[TEST] 已保存子报告: type={report_type}")
+        except Exception as e:
+            logger.error(f"[TEST] 保存子报告失败: type={report_type}, 错误: {e}")

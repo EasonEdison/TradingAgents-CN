@@ -33,6 +33,12 @@ services:
       TRADINGAGENTS_MONGODB_URL: mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin
       TRADINGAGENTS_REDIS_URL: redis://:tradingagents123@redis:6379
       TRADINGAGENTS_CACHE_TYPE: redis
+      TRADINGAGENTS_MYSQL_URL: mysql://tradinguser:tradinguser123@mysql:3306/tradingagents
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: tradinguser
+      MYSQL_PASSWORD: tradinguser123
+      MYSQL_DATABASE: tradingagents
       # Docker环境标识和PDF支持
       DOCKER_CONTAINER: "true"
       DISPLAY: ":99"
@@ -140,6 +146,30 @@ services:
     profiles:
       - management  # 使用 --profile management 启动
 
+  # MySQL数据库服务
+  mysql:
+    image: mysql:8.0
+    container_name: tradingagents-mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: tradingagents123
+      MYSQL_DATABASE: tradingagents
+      MYSQL_USER: tradinguser
+      MYSQL_PASSWORD: tradinguser123
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - tradingagents-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
 # 数据卷定义
 volumes:
   mongodb_data:
@@ -148,6 +178,9 @@ volumes:
   redis_data:
     driver: local
     name: tradingagents_redis_data
+  mysql_data:
+    driver: local
+    name: tradingagents_mysql_data
 
 # 网络定义
 networks:
