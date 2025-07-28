@@ -520,6 +520,21 @@ class DatabaseManager:
                 FOREIGN KEY (session_id) REFERENCES report_sessions(id) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS trade_records (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                stock_symbol VARCHAR(32) NOT NULL,
+                stock_name VARCHAR(64) DEFAULT NULL,
+                market_type VARCHAR(8) DEFAULT NULL,
+                trade_type ENUM('买入', '卖出') NOT NULL,
+                trade_time DATETIME NOT NULL,
+                shares INT NOT NULL,
+                price_per_share DECIMAL(12,2) NOT NULL,
+                total_amount DECIMAL(16,2) NOT NULL,
+                reason TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """)
         conn.commit()
         cursor.close()
 
@@ -552,6 +567,85 @@ class DatabaseManager:
         cursor.execute(insert_sql, (session_id, report_type, report_markdown, advice))
         conn.commit()
         cursor.close()
+
+    # --- Trade Records CRUD ---
+    def insert_trade_record(self, stock_symbol, stock_name, market_type, trade_type, trade_time, shares, price_per_share, total_amount, reason):
+        if not self.is_mysql_available():
+            return None
+        conn = self.get_mysql_conn()
+        cursor = conn.cursor()
+        cursor.execute(f"USE {self.mysql_config['database']};")
+        sql = """
+            INSERT INTO trade_records (stock_symbol, stock_name, market_type, trade_type, trade_time, shares, price_per_share, total_amount, reason)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        cursor.execute(sql, (stock_symbol, stock_name, market_type, trade_type, trade_time, shares, price_per_share, total_amount, reason))
+        conn.commit()
+        record_id = cursor.lastrowid
+        cursor.close()
+        return record_id
+
+    def update_trade_record(self, record_id, stock_symbol, stock_name, market_type, trade_type, trade_time, shares, price_per_share, total_amount, reason):
+        if not self.is_mysql_available():
+            return False
+        conn = self.get_mysql_conn()
+        cursor = conn.cursor()
+        cursor.execute(f"USE {self.mysql_config['database']};")
+        sql = """
+            UPDATE trade_records SET stock_symbol=%s, stock_name=%s, market_type=%s, trade_type=%s, trade_time=%s, shares=%s, price_per_share=%s, total_amount=%s, reason=%s WHERE id=%s
+        """
+        cursor.execute(sql, (stock_symbol, stock_name, market_type, trade_type, trade_time, shares, price_per_share, total_amount, reason, record_id))
+        conn.commit()
+        cursor.close()
+        return True
+
+    def delete_trade_record(self, record_id):
+        if not self.is_mysql_available():
+            return False
+        conn = self.get_mysql_conn()
+        cursor = conn.cursor()
+        cursor.execute(f"USE {self.mysql_config['database']};")
+        sql = "DELETE FROM trade_records WHERE id=%s"
+        cursor.execute(sql, (record_id,))
+        conn.commit()
+        cursor.close()
+        return True
+
+    def get_trade_records(self):
+        if not self.is_mysql_available():
+            return []
+        conn = self.get_mysql_conn()
+        cursor = conn.cursor()
+        cursor.execute(f"USE {self.mysql_config['database']};")
+        sql = "SELECT id, stock_symbol, stock_name, market_type, trade_type, trade_time, shares, price_per_share, total_amount, reason, created_at FROM trade_records ORDER BY trade_time DESC, id DESC"
+        cursor.execute(sql)
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
+
+    def get_trade_record(self, record_id):
+        if not self.is_mysql_available():
+            return None
+        conn = self.get_mysql_conn()
+        cursor = conn.cursor()
+        cursor.execute(f"USE {self.mysql_config['database']};")
+        sql = "SELECT id, stock_symbol, stock_name, market_type, trade_type, trade_time, shares, price_per_share, total_amount, reason, created_at FROM trade_records WHERE id=%s"
+        cursor.execute(sql, (record_id,))
+        row = cursor.fetchone()
+        cursor.close()
+        return row
+
+    def get_trade_records_by_symbol(self, stock_symbol):
+        if not self.is_mysql_available():
+            return []
+        conn = self.get_mysql_conn()
+        cursor = conn.cursor()
+        cursor.execute(f"USE {self.mysql_config['database']};")
+        sql = "SELECT id, stock_symbol, stock_name, market_type, trade_type, trade_time, shares, price_per_share, total_amount, reason, created_at FROM trade_records WHERE stock_symbol=%s ORDER BY trade_time DESC, id DESC"
+        cursor.execute(sql, (stock_symbol,))
+        rows = cursor.fetchall()
+        cursor.close()
+        return rows
 
 
 # 全局数据库管理器实例
