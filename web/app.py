@@ -629,7 +629,7 @@ def main():
                     '风险评分': f"{decision_risk_score:.2f}" if decision_risk_score is not None else '-',
                     '目标价位': str(decision_target_price) if decision_target_price is not None else '-',
                     '创建时间': str(created_at),
-                    '详情': f"[查看详情](/历史详情?session_id={session_id})"
+                    '详情': f"[查看详情](/record_detail?session_id={session_id})"
                 })
             
             if data:
@@ -663,6 +663,7 @@ def main():
                         '风险评分': row['风险评分'],
                         '目标价位': row['目标价位'],
                         '创建时间': row['创建时间'],
+                        '详情': row['详情'],
                         'Session ID': session_id
                     })
                 
@@ -672,29 +673,18 @@ def main():
                 df_display_with_index = df_display.copy()
                 df_display_with_index.insert(0, '序号', range(1, len(df_display_with_index) + 1))
                 
-                # 使用Streamlit的dataframe显示，支持更好的表格格式
+                # 新增：表格上方添加选择器（保留，但不做锚定和高亮）
+                options = [f"#{i+1} {row['股票代码']} {row['创建时间']} {row['建议']}" for i, row in enumerate(display_data)]
+                st.selectbox("点击选择要查看详情的记录：", options, index=0 if options else None)
+                # 恢复为st.dataframe显示表格
                 st.dataframe(df_display_with_index.drop('Session ID', axis=1), use_container_width=True, hide_index=True)
-                
-                # 在表格下方添加可点击的详情按钮，使用列布局
+                # 在表格下方添加可点击的详情链接，兼容所有环境
                 st.subheader("📋 快速查看详情")
-                # 每行显示3个按钮
-                for i in range(0, len(display_data), 3):
-                    cols = st.columns(3)
-                    for j in range(3):
-                        if i + j < len(display_data):
-                            row = display_data[i + j]
-                            with cols[j]:
-                                # 创建更详细的按钮文本，包含序号、时间和建议来区分
-                                time_str = row['创建时间'][11:16]  # 只显示时:分
-                                advice_str = row['建议'] if row['建议'] != '-' else '无建议'
-                                button_text = f"#{i+j+1} {row['股票代码']} ({time_str}) {advice_str}"
-                                if st.button(button_text, key=f"detail_{row['Session ID']}"):
-                                    # 使用JS跳转到详情页
-                                    st.markdown(f"""
-                                    <script>
-                                    window.location.href = '/历史详情?session_id={row['Session ID']}';
-                                    </script>
-                                    """, unsafe_allow_html=True)
+                for i, row in enumerate(display_data):
+                    time_str = row['创建时间'][11:16]
+                    advice_str = row['建议'] if row['建议'] != '-' else '无建议'
+                    detail_url = f"/record_detail?session_id={row['Session ID']}"
+                    st.markdown(f"<span style='font-size:15px;'>#{i+1} {row['股票代码']} ({time_str}) {advice_str} </span> <a href='{detail_url}' target='_self' style='color:#1a73e8;font-weight:bold;'>查看详情</a>", unsafe_allow_html=True)
             else:
                 st.info("暂无历史记录")
             cursor.close()
@@ -713,7 +703,7 @@ def main():
         import re
         import streamlit.web.server.websocket_headers as ws_headers
         url = ws_headers._get_websocket_headers().get('referer', '')
-        m = re.search(r'session_id=(\d+)', url)
+        m = re.search(r'record_detail\\?session_id=(\\d+)', url)
         if m:
             session_id = m.group(1)
     if session_id:
