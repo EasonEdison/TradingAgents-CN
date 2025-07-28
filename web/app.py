@@ -689,9 +689,12 @@ def main():
                                 advice_str = row['建议'] if row['建议'] != '-' else '无建议'
                                 button_text = f"#{i+j+1} {row['股票代码']} ({time_str}) {advice_str}"
                                 if st.button(button_text, key=f"detail_{row['Session ID']}"):
-                                    # 设置查询参数并重新运行
-                                    st.query_params["session_id"] = row['Session ID']
-                                    st.rerun()
+                                    # 使用JS跳转到详情页
+                                    st.markdown(f"""
+                                    <script>
+                                    window.location.href = '/历史详情?session_id={row['Session ID']}';
+                                    </script>
+                                    """, unsafe_allow_html=True)
             else:
                 st.info("暂无历史记录")
             cursor.close()
@@ -735,11 +738,14 @@ def main():
                 st.success(f"**最终投资建议**: {final_advice}")
             # 决策摘要信息
             with st.expander("决策摘要信息", expanded=True):
-                st.write(f"**决策**: {decision_action if decision_action else '-'}")
-                st.write(f"**置信度**: {decision_confidence if decision_confidence is not None else '-'}")
-                st.write(f"**风险评分**: {decision_risk_score if decision_risk_score is not None else '-'}")
-                st.write(f"**目标价位**: {decision_target_price if decision_target_price else '-'}")
-                st.write(f"**决策摘要**: {decision_summary if decision_summary else '-'}")
+                if not any([decision_action, decision_confidence, decision_risk_score, decision_target_price, decision_summary]):
+                    st.info("无决策摘要信息")
+                else:
+                    st.write(f"**决策**: {decision_action if decision_action else '-'}")
+                    st.write(f"**置信度**: {decision_confidence if decision_confidence is not None else '-'}")
+                    st.write(f"**风险评分**: {decision_risk_score if decision_risk_score is not None else '-'}")
+                    st.write(f"**目标价位**: {decision_target_price if decision_target_price else '-'}")
+                    st.write(f"**决策摘要**: {decision_summary if decision_summary else '-'}")
             # 查询所有子报告
             cursor.execute("SELECT report_type, report_markdown, created_at, advice FROM analysis_reports WHERE session_id=%s ORDER BY report_type", (session_id,))
             reports = cursor.fetchall()
