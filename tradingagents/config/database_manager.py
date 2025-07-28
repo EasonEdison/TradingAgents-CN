@@ -492,6 +492,8 @@ class DatabaseManager:
             return
         conn = self.get_mysql_conn()
         cursor = conn.cursor()
+        # 显式切换到目标数据库
+        cursor.execute(f"USE {self.mysql_config['database']};")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS report_sessions (
                 id INT AUTO_INCREMENT PRIMARY KEY,

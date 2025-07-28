@@ -577,6 +577,9 @@ def main():
             db_manager = get_database_manager()
             db_manager.create_tables_if_not_exist()
             conn = db_manager.get_mysql_conn()
+            if conn is None:
+                st.error("MySQL数据库连接失败，请检查数据库服务是否启动、配置是否正确。")
+                return
             cursor = conn.cursor()
             # 筛选条件
             advice_options = ['全部', '买入', '卖出', '持有', '无建议']
